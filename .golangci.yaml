@@ -5,6 +5,8 @@ linters:
   - depguard
   - wsl
   settings:
+    gomoddirectives:
+      replace-local: true
     govet:
       enable-all: true
     revive:
