@@ -23,6 +23,10 @@ var (
 	errSSHExit          = errors.New("exit 1")
 )
 
+func resolvedTestProgram() string {
+	return filepath.Join(string(os.PathSeparator), "mock", testProgram)
+}
+
 //nolint:funlen // table test enumerates each validation branch.
 func TestNew(t *testing.T) {
 	t.Parallel()
@@ -145,7 +149,7 @@ func TestSign_StdioFormats(t *testing.T) {
 			assert.Equal(t, "commit body\n", stdin)
 
 			require.Len(t, calls(), 1)
-			assert.Equal(t, testProgram, calls()[0].program)
+			assert.Equal(t, resolvedTestProgram(), calls()[0].program)
 			assert.Equal(t, []string{"--status-fd=2", "-bsau", "KEYID"}, calls()[0].args)
 		})
 	}
@@ -299,6 +303,86 @@ func TestSign_SSHFailure(t *testing.T) {
 	sig, err := signer.Sign(strings.NewReader("body"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh failed")
+	require.Nil(t, sig)
+}
+
+func TestSign_SSHPathPrefixedSshDash(t *testing.T) {
+	t.Parallel()
+
+	signer, calls := newTestSigner(t, FormatSSH, "ssh-key-path", func(cmd *mockCommand) error {
+		bufferFile := cmd.args[len(cmd.args)-1]
+
+		return writeSignatureFile(bufferFile)
+	})
+
+	sig, err := signer.Sign(strings.NewReader("body"))
+	require.NoError(t, err)
+	require.NotNil(t, sig)
+
+	require.Len(t, calls(), 1)
+	args := calls()[0].args
+	require.Len(t, args, 7)
+	assert.Equal(t, []string{"-Y", "sign", "-n", "git", "-f", "ssh-key-path"}, args[:6])
+}
+
+func TestSign_StdioOutputTooLarge(t *testing.T) {
+	t.Parallel()
+
+	signer, _ := newTestSigner(t, FormatOpenPGP, "KEYID", func(cmd *mockCommand) error {
+		oversized := make([]byte, maxSignatureSize+1)
+
+		_, err := cmd.stdout.Write(oversized)
+		if err != nil {
+			return fmt.Errorf("oversized stdout: %w", err)
+		}
+
+		return nil
+	})
+
+	sig, err := signer.Sign(strings.NewReader("body"))
+	require.ErrorIs(t, err, ErrOutputLimitExceeded)
+	assert.Contains(t, err.Error(), "stdout")
+	require.Nil(t, sig)
+}
+
+func TestSign_StderrTooLarge(t *testing.T) {
+	t.Parallel()
+
+	signer, _ := newTestSigner(t, FormatOpenPGP, "KEYID", func(cmd *mockCommand) error {
+		oversized := make([]byte, maxStderrSize+1)
+
+		_, err := cmd.stderr.Write(oversized)
+		if err != nil {
+			return fmt.Errorf("oversized stderr: %w", err)
+		}
+
+		return nil
+	})
+
+	sig, err := signer.Sign(strings.NewReader("body"))
+	require.ErrorIs(t, err, ErrOutputLimitExceeded)
+	assert.Contains(t, err.Error(), "stderr")
+	require.Nil(t, sig)
+}
+
+func TestSign_SSHSignatureTooLarge(t *testing.T) {
+	t.Parallel()
+
+	signer, _ := newTestSigner(t, FormatSSH, "/path/to/key", func(cmd *mockCommand) error {
+		bufferFile := cmd.args[len(cmd.args)-1]
+
+		oversized := make([]byte, maxSignatureSize+1)
+
+		err := os.WriteFile(bufferFile+".sig", oversized, bufferFileMode)
+		if err != nil {
+			return fmt.Errorf("writing oversized signature: %w", err)
+		}
+
+		return nil
+	})
+
+	sig, err := signer.Sign(strings.NewReader("body"))
+	require.ErrorIs(t, err, ErrSignatureTooLarge)
 	require.Nil(t, sig)
 }
 
