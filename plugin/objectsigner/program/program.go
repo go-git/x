@@ -12,8 +12,8 @@
 // prefix or the deprecated raw ssh-* form, are written to a temporary key
 // file and passed with -U so ssh-keygen signs via ssh-agent.
 //
-// The program must be a bare binary name resolvable on $PATH (e.g. "gpg",
-// not "/usr/bin/gpg" or "./gpg").
+// The program may be a bare binary name resolved on $PATH (e.g. "gpg") or
+// a path to an executable (e.g. "/usr/bin/gpg" or "./gpg").
 package program
 
 import (
@@ -49,11 +49,9 @@ var (
 	ErrUnsupportedFormat = errors.New("unsupported signing format")
 	// ErrEmptyProgram is returned when no program name was provided.
 	ErrEmptyProgram = errors.New("program is empty")
-	// ErrInvalidProgram is returned when program is not a bare binary name
-	// (i.e. contains a path separator).
-	ErrInvalidProgram = errors.New("program must be a bare binary name")
-	// ErrProgramNotFound is returned when program cannot be resolved on $PATH.
-	ErrProgramNotFound = errors.New("program not found in PATH")
+	// ErrProgramNotFound is returned when program cannot be resolved as
+	// either a path to an existing executable or a bare name on $PATH.
+	ErrProgramNotFound = errors.New("program not found")
 	// ErrEmptySigningKey is returned when no signing key was provided.
 	ErrEmptySigningKey = errors.New("signing key is empty")
 	// ErrNilMessage is returned when a nil message is passed to Sign.
@@ -69,8 +67,8 @@ var (
 // New returns a signer that invokes program to produce a signature in the
 // given format using the provided signing key.
 //
-// program must be a bare binary name (no path separators) and must resolve
-// on $PATH at the time of this call; otherwise [ErrInvalidProgram] or
+// program is either a bare binary name resolved on $PATH or a path to an
+// executable; it must resolve at the time of this call, otherwise
 // [ErrProgramNotFound] is returned.
 //
 // For OpenPGP and X.509, signingKey is the key ID or fingerprint passed to
@@ -125,17 +123,15 @@ func newSigner(
 	}, nil
 }
 
-// resolveProgram validates that program is a bare binary name and returns
-// the absolute path that lookPath resolves it to. The resolved path is
-// captured at New() time and reused by Sign() so a $PATH change between the
-// two calls cannot redirect execution to a different binary.
+// resolveProgram returns the absolute path that lookPath resolves program
+// to. When program contains a path separator, lookPath (exec.LookPath in
+// production) verifies the file exists and is executable and returns the
+// path unchanged; otherwise it is searched for on $PATH. The resolved path
+// is captured at New() time and reused by Sign() so a $PATH change between
+// the two calls cannot redirect execution to a different binary.
 func resolveProgram(program string, lookPath func(string) (string, error)) (string, error) {
 	if program == "" {
 		return "", ErrEmptyProgram
-	}
-
-	if filepath.Base(program) != program {
-		return "", fmt.Errorf("%w: %q", ErrInvalidProgram, program)
 	}
 
 	resolved, err := lookPath(program)

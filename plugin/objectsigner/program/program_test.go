@@ -70,20 +70,20 @@ func TestNew(t *testing.T) {
 		{
 			name: "absolute path program", format: FormatOpenPGP,
 			program:    filepath.Join(string(os.PathSeparator), "usr", "bin", testProgram),
-			signingKey: "k", wantErr: ErrInvalidProgram,
+			signingKey: "k", wantErr: nil,
 		},
 		{
 			name: "relative path program", format: FormatOpenPGP,
 			program:    "." + string(os.PathSeparator) + testProgram,
-			signingKey: "k", wantErr: ErrInvalidProgram,
+			signingKey: "k", wantErr: nil,
 		},
 		{
 			name: "subdir program", format: FormatOpenPGP,
 			program:    filepath.Join("bin", testProgram),
-			signingKey: "k", wantErr: ErrInvalidProgram,
+			signingKey: "k", wantErr: nil,
 		},
 		{
-			name: "program not in PATH", format: FormatOpenPGP,
+			name: "program not found", format: FormatOpenPGP,
 			program: "missing", signingKey: "k", wantErr: ErrProgramNotFound,
 		},
 		{
