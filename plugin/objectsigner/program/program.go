@@ -126,9 +126,11 @@ func newSigner(
 // resolveProgram returns the absolute path that lookPath resolves program
 // to. When program contains a path separator, lookPath (exec.LookPath in
 // production) verifies the file exists and is executable and returns the
-// path unchanged; otherwise it is searched for on $PATH. The resolved path
-// is captured at New() time and reused by Sign() so a $PATH change between
-// the two calls cannot redirect execution to a different binary.
+// path as given; otherwise it is searched for on $PATH. Relative results
+// (e.g. from a "./gpg" input) are anchored to the current working directory
+// via filepath.Abs so that the path captured at New() time cannot be
+// redirected by a $PATH change or a working-directory change before Sign()
+// runs.
 func resolveProgram(program string, lookPath func(string) (string, error)) (string, error) {
 	if program == "" {
 		return "", ErrEmptyProgram
@@ -139,7 +141,12 @@ func resolveProgram(program string, lookPath func(string) (string, error)) (stri
 		return "", fmt.Errorf("%w: %q: %w", ErrProgramNotFound, program, err)
 	}
 
-	return resolved, nil
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolving absolute path for %q: %w", program, err)
+	}
+
+	return absolute, nil
 }
 
 // Sign reads message and returns the signature produced by the external

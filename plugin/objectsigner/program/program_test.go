@@ -24,7 +24,12 @@ var (
 )
 
 func resolvedTestProgram() string {
-	return filepath.Join(string(os.PathSeparator), "mock", testProgram)
+	abs, err := filepath.Abs(filepath.Join(string(os.PathSeparator), "mock", testProgram))
+	if err != nil {
+		panic(err)
+	}
+
+	return abs
 }
 
 //nolint:funlen // table test enumerates each validation branch.
@@ -108,6 +113,21 @@ func TestNew(t *testing.T) {
 			require.NotNil(t, signer)
 		})
 	}
+}
+
+func TestNew_RelativeResolvedPathBecomesAbsolute(t *testing.T) {
+	t.Parallel()
+
+	lookPath := func(string) (string, error) {
+		return filepath.Join("relative", "to", "cwd", testProgram), nil
+	}
+	commandContext, _ := stubCommand(nil)
+
+	signer, err := newSigner(FormatOpenPGP, "./"+testProgram, "k", lookPath, commandContext)
+	require.NoError(t, err)
+	require.NotNil(t, signer)
+	assert.True(t, filepath.IsAbs(signer.program),
+		"program should be anchored to an absolute path, got %q", signer.program)
 }
 
 func TestSign_NilMessage(t *testing.T) {
