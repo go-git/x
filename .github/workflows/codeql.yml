@@ -1,0 +1,52 @@
+name: CodeQL
+
+on:
+  workflow_dispatch:
+    inputs:
+      go-git-ref:
+        description: 'go-git branch, tag, or commit to analyze'
+        required: false
+        default: 'main'
+        type: string
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze go-git with custom queries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout x repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Checkout go-git repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: go-git/go-git
+          ref: ${{ inputs.go-git-ref || 'main' }}
+          path: go-git
+          fetch-depth: 0
+
+      - name: Copy CodeQL queries to go-git
+        run: cp -r codeql go-git/
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
+        with:
+          languages: go
+          source-root: go-git
+          config-file: go-git/codeql/codeql-config.yml
+          checkout-path: go-git
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
+        with:
+          category: go-git-custom-queries
+          checkout-path: go-git
