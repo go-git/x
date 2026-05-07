@@ -10,9 +10,6 @@ on:
         type: string
   push:
     branches: [main]
-  schedule:
-    # Run weekly on Mondays at 00:00 UTC
-    - cron: '0 0 * * 1'
 
 permissions:
   contents: read
@@ -41,7 +38,7 @@ jobs:
         run: cp -r codeql go-git/
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
+        uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
         with:
           languages: go
           source-root: go-git
@@ -49,7 +46,7 @@ jobs:
           checkout-path: go-git
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@c3f298df8c1fea2fefe20c785e6aa00f32df8260 # v4.35.3
+        uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
         with:
           category: go-git-custom-queries
           checkout-path: go-git
