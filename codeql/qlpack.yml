@@ -1,0 +1,5 @@
+name: go-git/codeql-queries
+version: 0.0.1
+library: false
+dependencies:
+  codeql/go-all: "*"

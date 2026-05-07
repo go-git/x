@@ -1,0 +1,4 @@
+name: "go-git resource leak detection"
+
+queries:
+  - uses: ./queries/unclosed-resources.ql
