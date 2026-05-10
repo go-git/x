@@ -12,88 +12,143 @@
 import go
 
 /**
- * A type that represents either `*Repository` or a Storage type that needs closing.
+ * A function that creates a Repository
  */
-class ResourceType extends Type {
-  ResourceType() {
-    // Repository type
-    this.(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6", "Repository")
-    or
-    // filesystem.Storage
-    this.(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", "Storage")
-    or
-    // transactional.Storage
-    this.(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", "Storage")
+class RepositoryCreation extends DataFlow::CallNode {
+  RepositoryCreation() {
+    this.getTarget().hasQualifiedName("github.com/go-git/go-git/v6", [
+      "PlainOpen", "PlainOpenWithOptions", "PlainClone", "PlainCloneContext",
+      "PlainInit", "Init", "Clone", "CloneContext", "Open"
+    ])
   }
 }
 
 /**
- * A function call that creates a resource (Repository or Storage).
+ * A function that creates a Storage
  */
-class ResourceCreation extends CallExpr {
-  ResourceCreation() {
-    exists(Function f | f = this.getTarget() |
-      // Repository creation functions
-      f.hasQualifiedName("github.com/go-git/go-git/v6", ["PlainOpen", "PlainOpenWithOptions", "PlainClone", "PlainCloneContext", "PlainInit", "Init", "Clone", "CloneContext", "Open"])
-      or
-      // Storage creation functions
-      f.hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", ["NewStorage", "NewStorageWithOptions"])
-      or
-      f.hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", "NewStorage")
-      or
-      // Submodule.Repository() method
-      f.hasQualifiedName("github.com/go-git/go-git/v6", "Submodule", "Repository")
-      or
-      // Worktree.Repository() method
-      f.hasQualifiedName("github.com/go-git/go-git/v6", "Worktree", "Repository")
-      or
-      // Repository.Worktree() method returns a Worktree with repository field
-      f.hasQualifiedName("github.com/go-git/go-git/v6", "Repository", "Worktree")
-    )
+class StorageCreation extends DataFlow::CallNode {
+  StorageCreation() {
+    this.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", [
+      "NewStorage", "NewStorageWithOptions"
+    ])
+    or
+    this.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", "NewStorage")
   }
 }
 
 /**
- * A call to Close() method on a resource.
+ * A function that returns a Repository or Storage (factory function).
+ * Resources returned by factory functions are the caller's responsibility to close.
  */
-class CloseCall extends MethodCall {
+predicate isFactoryFunction(FuncDef f) {
+  exists(Type resultType |
+    resultType = f.getType().getResultType(0) |
+    resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6", "Repository")
+    or
+    resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", "Storage")
+    or
+    resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", "Storage")
+    or
+    // Storage-related interfaces
+    resultType.getName() = ["Storer", "EncodedObjectStorer"]
+  )
+}
+
+/**
+ * A call to Close() method
+ */
+class CloseCall extends DataFlow::MethodCallNode {
   CloseCall() {
-    this.getTarget().getName() = "Close" and
-    this.getReceiver().getType() instanceof ResourceType
+    this.getTarget().getName() = "Close"
   }
 }
 
 /**
- * Checks if a variable has a Close() call (direct or in defer) in the same function.
+ * Checks if there's a direct Close() call using dataflow.
  */
-predicate hasCloseCall(SsaVariable v) {
+predicate hasDirectClose(DataFlow::Node resource, FuncDef f) {
   exists(CloseCall close |
-    close.getReceiver() = v.getAUse()
-  )
-  or
-  // Check for defer Close() patterns
-  exists(DeferStmt defer, CloseCall close |
-    defer.getCall() = close and
-    close.getReceiver() = v.getAUse()
-  )
-  or
-  // Check for defer func() { _ = x.Close() }() patterns
-  exists(DeferStmt defer, FuncLit fn, AssignStmt assign, CloseCall close |
-    defer.getCall().(CallExpr).getCalleeExpr() = fn and
-    fn.getBody().getAStmt() = assign and
-    assign.getRhs(0) = close and
-    close.getReceiver() = v.getAUse()
+    DataFlow::localFlow(resource, close.getReceiver()) and
+    close.asExpr().getEnclosingFunction() = f
   )
 }
 
-from ResourceCreation create, SsaVariable v
+/**
+ * Checks if there's a Close() call on the same variable name.
+ * This handles cases where dataflow doesn't track through embedded fields.
+ */
+predicate hasCloseOnSameVariable(DataFlow::CallNode create, FuncDef f) {
+  exists(CallExpr closeCall, SelectorExpr sel, Ident closeVar, Ident createVar, string varName |
+    // The Close() call
+    closeCall.getEnclosingFunction() = f and
+    sel.getParent() = closeCall and
+    sel.getSelector().getName() = "Close" and
+    closeVar = sel.getBase() and
+    closeVar.getName() = varName and
+    // The creation assignment (handles both := and =)
+    (
+      create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs() = createVar
+    ) and
+    createVar.getName() = varName
+  )
+}
+
+/**
+ * Checks if there's a defer statement with Close() in the function.
+ * This is a conservative check - if there's any defer Close() in the function,
+ * we assume the resource might be cleaned up (to avoid false positives).
+ */
+predicate hasDeferWithClose(FuncDef f) {
+  exists(DeferStmt defer, SelectorExpr sel |
+    defer.getEnclosingFunction() = f and
+    sel.getParent+() = defer and
+    sel.getSelector().getName() = "Close"
+  )
+}
+
+/**
+ * Checks if there's a testing.TB.Cleanup() call with Close() in the function.
+ * This handles patterns like: t.Cleanup(func() { _ = r.Close() })
+ */
+predicate hasTestingCleanupWithClose(FuncDef f) {
+  exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, SelectorExpr sel |
+    cleanup.getTarget().getName() = "Cleanup" and
+    cleanup.asExpr().getEnclosingFunction() = f and
+    cleanupFunc = cleanup.getArgument(0).asExpr() and
+    sel.getParent+() = cleanupFunc and
+    sel.getSelector().getName() = "Close"
+  )
+}
+
+/**
+ * Checks if the resource is cleaned up.
+ */
+predicate hasCleanup(DataFlow::CallNode create, DataFlow::Node resource, FuncDef f) {
+  hasDirectClose(resource, f)
+  or
+  hasDeferWithClose(f)
+  or
+  hasTestingCleanupWithClose(f)
+  or
+  hasCloseOnSameVariable(create, f)
+}
+
+from DataFlow::CallNode create, DataFlow::Node resource, FuncDef enclosingFunc
 where
-  // The resource is assigned to a variable
-  v.getDefinition().(SsaExplicitDefinition).getInstruction().getNode() = create and
-  // The variable is not closed
-  not hasCloseCall(v) and
-  // The variable is not assigned to a field (which might be closed elsewhere)
-  not exists(Field f | v.getAUse() = f.getAWrite().getRhs()) and
-  // The variable is not returned (caller's responsibility)
-  not exists(ReturnStmt ret | v.getAUse() = ret.getExpr())
-select create, "This resource is created but never closed, which may cause file handle leaks."
+  (create instanceof RepositoryCreation or create instanceof StorageCreation) and
+  resource = create.getResult(0) and
+  enclosingFunc = create.asExpr().getEnclosingFunction() and
+  // Check if there's no cleanup for this resource
+  not hasCleanup(create, resource, enclosingFunc) and
+  // Exclude factory functions (return Repository/Storage to caller)
+  not isFactoryFunction(enclosingFunc) and
+  // Exclude resources assigned to struct fields (managed by struct lifecycle)
+  not exists(StructLit lit |
+    lit.getAnElement().(KeyValueExpr).getValue() = resource.asExpr()
+  ) and
+  // Exclude direct calls to memory.NewStorage (doesn't need closing)
+  not create.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage")
+select create.asExpr(),
+  "Resource created but may not be closed. " +
+  "Always call defer func() { _ = r.Close() }() after creating Repository or Storage instances."
