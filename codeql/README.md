@@ -15,7 +15,7 @@ Detects instances where `Repository` or `Storage` objects are created but never 
 
 **What it excludes (to avoid false positives):**
 - Factory functions that return Repository/Storage to the caller
-- Resources assigned to struct fields (managed by struct lifecycle)
+- Resources stored in struct literals (managed by struct lifecycle)
 - Direct calls to `memory.NewStorage` (no cleanup needed)
 - Factory functions that only create memory storage
 - Resources passed to wrapper types that are properly closed
@@ -82,7 +82,7 @@ Without the environment variable, `*_test.go` files are excluded by default.
 
 ### Using GitHub Actions
 
-The queries run automatically via the CodeQL workflow on pull requests and include test files.
+The queries run automatically via the CodeQL workflow on pushes to main and can be manually triggered via workflow_dispatch. Test files are included in the analysis.
 
 ## Contributing
 

@@ -82,10 +82,9 @@ predicate isFactoryFunction(FuncDef f) {
  * This analyzes what storage types are created inside the factory function.
  */
 predicate factoryCallCreatesOnlyMemoryStorage(FactoryCall call) {
-  exists(FuncDef factory, string name |
-    // Match function by name
-    name = call.getTarget().getName() and
-    factory.getName() = name and
+  exists(FuncDef factory |
+    // Match function by target binding (not just name)
+    factory = call.getTarget().getFuncDecl() and
     // Factory creates memory storage
     exists(DataFlow::CallNode memCreate |
       memCreate.asExpr().getEnclosingFunction() = factory and
@@ -178,13 +177,14 @@ predicate hasDeferCloseOnVariable(DataFlow::CallNode create, FuncDef f) {
 }
 
 /**
- * Checks if there's a defer statement with a type assertion to io.Closer on the variable.
+ * Checks if there's a defer statement with a type assertion to io.Closer and Close() call.
  * This handles patterns like:
  *   defer func() { if closer, ok := st.(io.Closer); ok { closer.Close() } }()
  * Where the variable is cast to io.Closer before calling Close().
  */
 predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
-  exists(DeferStmt defer, TypeAssertExpr typeAssert, Ident assertedVar, Ident createVar, string varName |
+  exists(DeferStmt defer, TypeAssertExpr typeAssert, Ident assertedVar, Ident createVar,
+         SelectorExpr closeCall, Ident closedVar, string varName, string closerName |
     // The defer statement is in the same function
     defer.getEnclosingFunction() = f and
     // There's a type assertion to io.Closer inside the defer
@@ -193,6 +193,13 @@ predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
     // The type assertion is on our variable
     assertedVar = typeAssert.getExpr() and
     assertedVar.getName() = varName and
+    // The type assertion result is assigned to a variable (e.g., closer, ok := ...)
+    typeAssert.getParent().(DefineStmt).getLhs(0).(Ident).getName() = closerName and
+    // There's a Close() call on the asserted variable within the defer
+    closeCall.getParent+() = defer.getCall() and
+    closeCall.getSelector().getName() = "Close" and
+    closedVar = closeCall.getBase() and
+    closedVar.getName() = closerName and
     // Match to the creation variable
     (
       // Simple assignment
@@ -211,29 +218,63 @@ predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
 }
 
 /**
- * Checks if there's a testing.TB.Cleanup() call with Close() in the function.
- * This handles patterns like: t.Cleanup(func() { _ = r.Close() })
+ * Checks if there's a testing.TB.Cleanup() call that closes the specific resource.
+ * This handles patterns like:
+ *   t.Cleanup(func() { _ = r.Close() })
+ * Or with type assertion:
+ *   t.Cleanup(func() { if c, ok := r.(io.Closer); ok { c.Close() } })
  */
-predicate hasTestingCleanupWithClose(FuncDef f) {
-  exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, SelectorExpr sel |
+predicate hasTestingCleanupWithClose(DataFlow::CallNode create, FuncDef f) {
+  exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, Ident createVar, string varName |
+    // The cleanup call
     cleanup.getTarget().getName() = "Cleanup" and
     cleanup.asExpr().getEnclosingFunction() = f and
     cleanupFunc = cleanup.getArgument(0).asExpr() and
-    sel.getParent+() = cleanupFunc and
-    sel.getSelector().getName() = "Close"
+    // Match to the creation variable
+    (
+      create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs() = createVar or
+      create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar
+    ) and
+    createVar.getName() = varName and
+    // The cleanup function closes the resource (either directly or via type assertion)
+    (
+      // Direct Close: r.Close()
+      exists(SelectorExpr sel, Ident cleanupVar |
+        sel.getParent+() = cleanupFunc and
+        sel.getSelector().getName() = "Close" and
+        cleanupVar = sel.getBase() and
+        cleanupVar.getName() = varName
+      )
+      or
+      // Type assertion Close: if c, ok := r.(io.Closer); ok { c.Close() }
+      exists(TypeAssertExpr typeAssert, Ident assertedVar, SelectorExpr closeCall, Ident closedVar, string closerName |
+        typeAssert.getParent+() = cleanupFunc and
+        assertedVar = typeAssert.getExpr() and
+        assertedVar.getName() = varName and
+        typeAssert.getParent().(DefineStmt).getLhs(0).(Ident).getName() = closerName and
+        closeCall.getParent+() = cleanupFunc and
+        closeCall.getSelector().getName() = "Close" and
+        closedVar = closeCall.getBase() and
+        closedVar.getName() = closerName
+      )
+    )
   )
 }
 
 /**
- * Checks if the resource is referenced in a function literal that is returned.
+ * Checks if the resource is closed in a function literal that is returned.
  * This handles patterns like:
  *   st := loader.Load(url)
  *   closeAll := func() error { st.Close() }
  *   return ..., closeAll
+ * Or with type assertion:
+ *   closeAll := func() error { if c, ok := st.(io.Closer); ok { c.Close() } }
  * Where the caller is responsible for invoking the cleanup callback.
  */
 predicate isClosedViaReturnedCallback(DataFlow::CallNode create, FuncDef f) {
-  exists(FuncLit callback, Ident resourceVar, Ident createVar, string varName, ReturnStmt ret |
+  exists(FuncLit callback, Ident createVar, string varName, ReturnStmt ret |
     // The resource is assigned to a variable
     (
       create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
@@ -244,9 +285,29 @@ predicate isClosedViaReturnedCallback(DataFlow::CallNode create, FuncDef f) {
     createVar.getName() = varName and
     // A function literal is defined in the same function
     callback.getEnclosingFunction() = f and
-    // The resource variable is referenced inside the function literal
-    resourceVar.getParent+() = callback and
-    resourceVar.getName() = varName and
+    // The callback closes the resource (either directly or via type assertion)
+    (
+      // Direct Close: st.Close()
+      exists(SelectorExpr closeCall, Ident closeVar |
+        closeCall.getParent+() = callback and
+        closeCall.getSelector().getName() = "Close" and
+        closeVar = closeCall.getBase() and
+        closeVar.getName() = varName
+      )
+      or
+      // Type assertion Close: if c, ok := st.(io.Closer); ok { c.Close() }
+      exists(TypeAssertExpr typeAssert, Ident assertedVar, SelectorExpr closeCall, Ident closedVar, string closerName |
+        typeAssert.getParent+() = callback and
+        typeAssert.getTypeExpr().(SelectorExpr).getSelector().getName() = "Closer" and
+        assertedVar = typeAssert.getExpr() and
+        assertedVar.getName() = varName and
+        typeAssert.getParent().(DefineStmt).getLhs(0).(Ident).getName() = closerName and
+        closeCall.getParent+() = callback and
+        closeCall.getSelector().getName() = "Close" and
+        closedVar = closeCall.getBase() and
+        closedVar.getName() = closerName
+      )
+    ) and
     // The function literal (or a variable containing it) is returned
     ret.getEnclosingFunction() = f and
     (
@@ -281,8 +342,8 @@ predicate hasCleanup(DataFlow::CallNode create, DataFlow::Node resource, FuncDef
   // Close() on same variable (handles embedded fields)
   hasCloseOnSameVariable(create, f)
   or
-  // testing.TB.Cleanup() pattern (conservative - any Cleanup with Close in function)
-  hasTestingCleanupWithClose(f)
+  // testing.TB.Cleanup() pattern matched by variable name
+  hasTestingCleanupWithClose(create, f)
   or
   // defer func() with type assertion to io.Closer
   hasDeferWithTypeAssertion(create, f)
