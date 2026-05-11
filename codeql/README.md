@@ -16,14 +16,24 @@ Detects instances where `Repository` or `Storage` objects are created but never 
 **What it excludes (to avoid false positives):**
 - Factory functions that return Repository/Storage to the caller
 - Resources assigned to struct fields (managed by struct lifecycle)
-- Resources in functions that return Repository or Storer types
-- **Any function that contains a defer statement with a Close() call** (conservative heuristic)
+- Direct calls to `memory.NewStorage` (no cleanup needed)
+- Factory functions that only create memory storage
+- Resources passed to wrapper types that are properly closed
+- Resources cleaned up via returned callback functions
+- Resources closed via type assertions: `if c, ok := st.(io.Closer); ok { c.Close() }`
+
+**Detection techniques:**
+- Precise variable name tracking for defer statements
+- Tuple assignment support: `r, err := git.Clone(...)`
+- Type assertion pattern recognition
+- Wrapper pattern detection (e.g., transactional storage wrapping filesystem storage)
+- Returned callback function analysis
+- Testing cleanup via `t.Cleanup()` or `b.Cleanup()`
 
 **Known limitations:**
-- Very conservative: if a function has ANY `defer ... Close()` statement, all resources in that function are assumed to be cleaned up
-- Will not detect leaks in functions that create multiple resources but only close some of them
-- Does not track inter-procedural dataflow (resources passed to other functions)
-- Designed to minimize false positives at the cost of potentially missing some true leaks
+- Does not track inter-procedural dataflow beyond one level (e.g., resources passed to helper functions)
+- Complex ownership transfer patterns may require manual verification
+- Designed for high precision (minimal false positives) while maintaining full leak detection coverage
 
 **Example violations:**
 

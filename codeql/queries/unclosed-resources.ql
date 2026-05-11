@@ -37,6 +37,29 @@ class StorageCreation extends DataFlow::CallNode {
 }
 
 /**
+ * A call to a user-defined factory function that returns a Repository or Storage.
+ */
+class FactoryCall extends DataFlow::CallNode {
+  FactoryCall() {
+    exists(Type resultType |
+      resultType = this.getTarget().getResultType(0) |
+      (
+        resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6", "Repository")
+        or
+        resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", "Storage")
+        or
+        resultType.getUnderlyingType().(PointerType).getBaseType().hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", "Storage")
+        or
+        resultType.getName() = ["Storer", "EncodedObjectStorer"]
+      ) and
+      // Exclude the direct creation functions (already covered by RepositoryCreation/StorageCreation)
+      not this instanceof RepositoryCreation and
+      not this instanceof StorageCreation
+    )
+  }
+}
+
+/**
  * A function that returns a Repository or Storage (factory function).
  * Resources returned by factory functions are the caller's responsibility to close.
  */
@@ -51,6 +74,36 @@ predicate isFactoryFunction(FuncDef f) {
     or
     // Storage-related interfaces
     resultType.getName() = ["Storer", "EncodedObjectStorer"]
+  )
+}
+
+/**
+ * Checks if a factory call returns a resource from a function that only creates memory storage.
+ * This analyzes what storage types are created inside the factory function.
+ */
+predicate factoryCallCreatesOnlyMemoryStorage(FactoryCall call) {
+  exists(FuncDef factory, string name |
+    // Match function by name
+    name = call.getTarget().getName() and
+    factory.getName() = name and
+    // Factory creates memory storage
+    exists(DataFlow::CallNode memCreate |
+      memCreate.asExpr().getEnclosingFunction() = factory and
+      memCreate.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage")
+    ) and
+    // And doesn't create any filesystem or transactional storage
+    not exists(DataFlow::CallNode fsCreate |
+      fsCreate.asExpr().getEnclosingFunction() = factory and
+      (
+        fsCreate.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/filesystem", _) or
+        fsCreate.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/transactional", _)
+      )
+    ) and
+    // And doesn't open repositories (which use filesystem storage)
+    not exists(DataFlow::CallNode repoCreate |
+      repoCreate.asExpr().getEnclosingFunction() = factory and
+      repoCreate instanceof RepositoryCreation
+    )
   )
 }
 
@@ -95,15 +148,65 @@ predicate hasCloseOnSameVariable(DataFlow::CallNode create, FuncDef f) {
 }
 
 /**
- * Checks if there's a defer statement with Close() in the function.
- * This is a conservative check - if there's any defer Close() in the function,
- * we assume the resource might be cleaned up (to avoid false positives).
+ * Checks if there's a defer statement that closes a specific resource.
+ * This matches the variable name from the creation to the defer Close().
+ * Handles both simple assignments and tuple assignments.
  */
-predicate hasDeferWithClose(FuncDef f) {
-  exists(DeferStmt defer, SelectorExpr sel |
+predicate hasDeferCloseOnVariable(DataFlow::CallNode create, FuncDef f) {
+  exists(DeferStmt defer, SelectorExpr sel, Ident deferVar, Ident createVar, string varName |
+    // The defer Close() call
     defer.getEnclosingFunction() = f and
-    sel.getParent+() = defer and
-    sel.getSelector().getName() = "Close"
+    sel.getParent+() = defer.getCall() and
+    sel.getSelector().getName() = "Close" and
+    deferVar = sel.getBase() and
+    deferVar.getName() = varName and
+    // The creation assignment
+    (
+      // Simple assignment: x := Create()
+      (
+        create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+        create.asExpr().getParent().(AssignStmt).getLhs() = createVar
+      ) or
+      // Tuple assignment: x, err := Create() - check first element (index 0)
+      (
+        create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+        create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar
+      )
+    ) and
+    createVar.getName() = varName
+  )
+}
+
+/**
+ * Checks if there's a defer statement with a type assertion to io.Closer on the variable.
+ * This handles patterns like:
+ *   defer func() { if closer, ok := st.(io.Closer); ok { closer.Close() } }()
+ * Where the variable is cast to io.Closer before calling Close().
+ */
+predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
+  exists(DeferStmt defer, TypeAssertExpr typeAssert, Ident assertedVar, Ident createVar, string varName |
+    // The defer statement is in the same function
+    defer.getEnclosingFunction() = f and
+    // There's a type assertion to io.Closer inside the defer
+    typeAssert.getParent+() = defer.getCall() and
+    typeAssert.getTypeExpr().(SelectorExpr).getSelector().getName() = "Closer" and
+    // The type assertion is on our variable
+    assertedVar = typeAssert.getExpr() and
+    assertedVar.getName() = varName and
+    // Match to the creation variable
+    (
+      // Simple assignment
+      (
+        create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+        create.asExpr().getParent().(AssignStmt).getLhs() = createVar
+      ) or
+      // Tuple assignment - check first element (index 0)
+      (
+        create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+        create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar
+      )
+    ) and
+    createVar.getName() = varName
   )
 }
 
@@ -122,21 +225,114 @@ predicate hasTestingCleanupWithClose(FuncDef f) {
 }
 
 /**
+ * Checks if the resource is referenced in a function literal that is returned.
+ * This handles patterns like:
+ *   st := loader.Load(url)
+ *   closeAll := func() error { st.Close() }
+ *   return ..., closeAll
+ * Where the caller is responsible for invoking the cleanup callback.
+ */
+predicate isClosedViaReturnedCallback(DataFlow::CallNode create, FuncDef f) {
+  exists(FuncLit callback, Ident resourceVar, Ident createVar, string varName, ReturnStmt ret |
+    // The resource is assigned to a variable
+    (
+      create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs() = createVar or
+      create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar
+    ) and
+    createVar.getName() = varName and
+    // A function literal is defined in the same function
+    callback.getEnclosingFunction() = f and
+    // The resource variable is referenced inside the function literal
+    resourceVar.getParent+() = callback and
+    resourceVar.getName() = varName and
+    // The function literal (or a variable containing it) is returned
+    ret.getEnclosingFunction() = f and
+    (
+      // Direct return: return ..., funcLit
+      callback.getParent+() = ret
+      or
+      // Indirect return via variable: x := funcLit; return ..., x
+      exists(Ident callbackVar, Ident retVar, string cbName |
+        (
+          callback.getParent().(DefineStmt).getLhs() = callbackVar or
+          callback.getParent().(AssignStmt).getLhs() = callbackVar
+        ) and
+        callbackVar.getName() = cbName and
+        retVar.getParent() = ret and
+        retVar.getName() = cbName
+      )
+    )
+  )
+}
+
+/**
  * Checks if the resource is cleaned up.
+ * Tries precise tracking first, falls back to conservative heuristics for complex cases.
  */
 predicate hasCleanup(DataFlow::CallNode create, DataFlow::Node resource, FuncDef f) {
+  // Direct Close() via dataflow
   hasDirectClose(resource, f)
   or
-  hasDeferWithClose(f)
+  // defer func() { r.Close() } pattern matched by variable name (precise)
+  hasDeferCloseOnVariable(create, f)
   or
+  // Close() on same variable (handles embedded fields)
+  hasCloseOnSameVariable(create, f)
+  or
+  // testing.TB.Cleanup() pattern (conservative - any Cleanup with Close in function)
   hasTestingCleanupWithClose(f)
   or
-  hasCloseOnSameVariable(create, f)
+  // defer func() with type assertion to io.Closer
+  hasDeferWithTypeAssertion(create, f)
+  or
+  // Cleanup callback returned to caller
+  isClosedViaReturnedCallback(create, f)
+}
+
+/**
+ * Checks if a resource is passed to a wrapper function that returns a properly-closed resource.
+ * This handles patterns like:
+ *   temporal := filesystem.NewStorage(...)
+ *   st := NewStorage(base, temporal)
+ *   defer func() { st.Close() }()
+ * Where closing st also closes temporal.
+ * Also handles type conversions: temporal := storage.Storer(filesystem.NewStorage(...))
+ */
+predicate isPassedToClosedWrapper(DataFlow::CallNode create, FuncDef f) {
+  exists(DataFlow::CallNode wrapper, Ident createVar, Ident argVar, string varName |
+    // The resource is assigned to a variable (may be wrapped in type conversion)
+    (
+      create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs() = createVar or
+      create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+      create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar or
+      // Handle type conversions: x := Type(create())
+      create.asExpr().getParent().getParent().(DefineStmt).getLhs() = createVar or
+      create.asExpr().getParent().getParent().(AssignStmt).getLhs() = createVar or
+      create.asExpr().getParent().getParent().(DefineStmt).getLhs(0) = createVar or
+      create.asExpr().getParent().getParent().(AssignStmt).getLhs(0) = createVar
+    ) and
+    createVar.getName() = varName and
+    // The variable is used as an argument to a wrapper function
+    wrapper.asExpr().getEnclosingFunction() = f and
+    wrapper.getAnArgument().asExpr() = argVar and
+    argVar.getName() = varName and
+    // The wrapper returns a Repository or Storage
+    (wrapper instanceof RepositoryCreation or
+     wrapper instanceof StorageCreation or
+     wrapper instanceof FactoryCall) and
+    // The wrapper is properly closed
+    hasCleanup(wrapper, wrapper.getResult(0), f)
+  )
 }
 
 from DataFlow::CallNode create, DataFlow::Node resource, FuncDef enclosingFunc
 where
-  (create instanceof RepositoryCreation or create instanceof StorageCreation) and
+  (create instanceof RepositoryCreation or
+   create instanceof StorageCreation or
+   create instanceof FactoryCall) and
   resource = create.getResult(0) and
   enclosingFunc = create.asExpr().getEnclosingFunction() and
   // Check if there's no cleanup for this resource
@@ -148,7 +344,11 @@ where
     lit.getAnElement().(KeyValueExpr).getValue() = resource.asExpr()
   ) and
   // Exclude direct calls to memory.NewStorage (doesn't need closing)
-  not create.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage")
+  not create.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage") and
+  // Exclude calls to factory functions that only create memory storage
+  not factoryCallCreatesOnlyMemoryStorage(create) and
+  // Exclude resources passed to wrappers that are properly closed
+  not isPassedToClosedWrapper(create, enclosingFunc)
 select create.asExpr(),
   "Resource created but may not be closed. " +
   "Always call defer func() { _ = r.Close() }() after creating Repository or Storage instances."
