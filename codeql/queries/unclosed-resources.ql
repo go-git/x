@@ -213,19 +213,18 @@ predicate hasDeferCloseOnVariable(DataFlow::CallNode create, FuncDef f) {
 }
 
 /**
- * Checks if there's a defer statement with a type assertion to io.Closer and Close() call.
+ * Checks if there's a defer statement with a type assertion and Close() call.
  * This handles patterns like:
  *   defer func() { if closer, ok := st.(io.Closer); ok { closer.Close() } }()
- * Where the variable is cast to io.Closer before calling Close().
+ * Works with any closer interface (io.Closer, custom interfaces, dot imports, aliases).
  */
 predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
   exists(DeferStmt defer, TypeAssertExpr typeAssert, Ident assertedVar, Ident createVar,
          SelectorExpr closeCall, Ident closedVar, string varName, string closerName |
     // The defer statement is in the same function
     defer.getEnclosingFunction() = f and
-    // There's a type assertion to io.Closer inside the defer
+    // There's a type assertion inside the defer
     typeAssert.getParent+() = defer.getCall() and
-    typeAssert.getTypeExpr().(SelectorExpr).getSelector().getName() = "Closer" and
     // The type assertion is on our variable
     assertedVar = typeAssert.getExpr() and
     assertedVar.getName() = varName and
@@ -365,10 +364,10 @@ predicate isClosedViaReturnedCallback(DataFlow::CallNode create, FuncDef f) {
         closeVar.getName() = varName
       )
       or
-      // Type assertion Close: if c, ok := st.(io.Closer); ok { c.Close() }
+      // Type assertion Close: if c, ok := st.(SomeCloser); ok { c.Close() }
       exists(TypeAssertExpr typeAssert, Ident assertedVar, SelectorExpr closeCall, Ident closedVar, string closerName |
         typeAssert.getParent+() = callback and
-        typeAssert.getTypeExpr().(SelectorExpr).getSelector().getName() = "Closer" and
+        // Don't check type name - works with any closer interface
         assertedVar = typeAssert.getExpr() and
         assertedVar.getName() = varName and
         typeAssert.getParent().(DefineStmt).getLhs(0).(Ident).getName() = closerName and
