@@ -271,6 +271,30 @@ predicate hasTestingCleanupWithClose(DataFlow::CallNode create, FuncDef f) {
     closeCall.asExpr().getEnclosingFunction+() = cleanupFunc and
     DataFlow::localFlow(create.getResult(0), closeCall.getReceiver())
   )
+  or
+  // Pattern: s.Field = Create(); r := s.Field; t.Cleanup(func() { r.Close() })
+  exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, SelectorExpr sel, Ident cleanupVar,
+         string cleanupVarName, SelectorExpr fieldLhs, string fieldName, DefineStmt copyStmt,
+         Ident copyLhs, SelectorExpr copyRhs |
+    // The cleanup call
+    cleanup.getTarget().getName() = "Cleanup" and
+    cleanup.asExpr().getEnclosingFunction() = f and
+    cleanupFunc = cleanup.getArgument(0).asExpr() and
+    // The cleanup function closes a variable
+    sel.getParent+() = cleanupFunc and
+    sel.getSelector().getName() = "Close" and
+    cleanupVar = sel.getBase() and
+    cleanupVar.getName() = cleanupVarName and
+    // The variable was assigned from a struct field
+    copyStmt.getEnclosingFunction() = f and
+    copyStmt.getLhs() = copyLhs and
+    copyLhs.getName() = cleanupVarName and
+    copyStmt.getRhs() = copyRhs and
+    copyRhs.getSelector().getName() = fieldName and
+    // The creation was assigned to that struct field
+    fieldLhs = create.asExpr().getParent().(AssignStmt).getLhs() and
+    fieldLhs.getSelector().getName() = fieldName
+  )
 }
 
 /**
