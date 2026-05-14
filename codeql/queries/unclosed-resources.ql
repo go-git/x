@@ -127,6 +127,22 @@ predicate factoryCallReturnsExistingResource(FactoryCall call) {
 }
 
 /**
+ * Checks if a factory call creates resources and also registers cleanup for them.
+ * These are cache-or-create factories that handle their own cleanup.
+ */
+predicate factoryCallRegistersCleanup(FactoryCall call) {
+  exists(FuncDef factory, DataFlow::CallNode create |
+    // Match function by target binding
+    factory = call.getTarget().getFuncDecl() and
+    // Factory creates a repository or storage
+    create.asExpr().getEnclosingFunction() = factory and
+    (create instanceof RepositoryCreation or create instanceof StorageCreation) and
+    // And registers cleanup for it
+    hasCleanup(create, create.getResult(0), factory)
+  )
+}
+
+/**
  * A call to Close() method
  */
 class CloseCall extends DataFlow::MethodCallNode {
@@ -529,6 +545,8 @@ where
   not factoryCallCreatesOnlyMemoryStorage(create) and
   // Exclude calls to factory functions that return existing resources (getters, not creators)
   not factoryCallReturnsExistingResource(create) and
+  // Exclude calls to factory functions that register their own cleanup (cache-or-create)
+  not factoryCallRegistersCleanup(create) and
   // Exclude resources passed to wrappers that are properly closed
   not isPassedToClosedWrapper(create, enclosingFunc) and
   // Exclude error path tests where we expect the call to fail
