@@ -18,22 +18,31 @@ Detects instances where `Repository` or `Storage` objects are created but never 
 - Resources stored in struct literals (managed by struct lifecycle)
 - Direct calls to `memory.NewStorage` (no cleanup needed)
 - Factory functions that only create memory storage
-- Resources passed to wrapper types that are properly closed
+- Factory functions that return existing resources without creating new ones (getters)
+- Factory functions that register their own cleanup (cache-or-create patterns)
+- Resources passed to wrapper types that are properly closed (including inline arguments)
 - Resources cleaned up via returned callback functions
 - Resources closed via type assertions: `if c, ok := st.(io.Closer); ok { c.Close() }`
+- Error path tests where creation is followed by error assertions (`Error`, `ErrorIs`, `NotNil`, etc.)
 
 **Detection techniques:**
-- Precise variable name tracking for defer statements
+- Precise variable name tracking for defer statements and cleanup callbacks
 - Tuple assignment support: `r, err := git.Clone(...)`
+- Variable declaration support: `var sto storage.Storer = filesystem.NewStorage(...)`
 - Type assertion pattern recognition
 - Wrapper pattern detection (e.g., transactional storage wrapping filesystem storage)
+- Inline argument detection: `r := Open(NewStorage(...))`
+- Struct field cleanup patterns: `s.Field = Create(); r := s.Field; t.Cleanup(func() { r.Close() })`
 - Returned callback function analysis
-- Testing cleanup via `t.Cleanup()` or `b.Cleanup()`
+- Testing cleanup via `t.Cleanup()` or `b.Cleanup()` (with dataflow tracking)
+- Error path detection to filter out tests that expect creation to fail
 
 **Known limitations:**
 - Does not track inter-procedural dataflow beyond one level (e.g., resources passed to helper functions)
+- Suite-level cleanup in test lifecycle methods (e.g., `TearDownTest()`) may not be detected
 - Complex ownership transfer patterns may require manual verification
-- Designed for high precision (minimal false positives) while maintaining full leak detection coverage
+- Local dataflow only - does not track through struct fields in general (exception: specific cleanup patterns)
+- Designed for high precision (minimal false positives) while maintaining high recall for actual resource leaks
 
 **Example violations:**
 
@@ -63,6 +72,31 @@ func good() error {
 // ALSO GOOD: Factory function (caller's responsibility)
 func createRepo() (*git.Repository, error) {
     return git.PlainOpen("/path/to/repo")
+}
+
+// ALSO GOOD: Error path test (expects creation to fail)
+func TestOpenInvalid(t *testing.T) {
+    r, err := git.PlainOpen("/invalid/path")
+    require.Error(t, err)  // Test expects error
+    require.Nil(t, r)
+}
+
+// ALSO GOOD: Testing cleanup callback
+func TestWithCleanup(t *testing.T) {
+    r, err := git.PlainOpen("/path/to/repo")
+    require.NoError(t, err)
+    t.Cleanup(func() { _ = r.Close() })
+    // ... use r
+}
+
+// ALSO GOOD: Inline wrapper pattern
+func example() error {
+    r, err := git.Open(filesystem.NewStorage(...), fs)  // Storage passed inline
+    if err != nil {
+        return err
+    }
+    defer func() { _ = r.Close() }()  // Closing r also closes storage
+    return nil
 }
 ```
 
