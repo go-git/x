@@ -407,26 +407,36 @@ predicate hasCleanup(DataFlow::CallNode create, DataFlow::Node resource, FuncDef
  */
 predicate isPassedToClosedWrapper(DataFlow::CallNode create, FuncDef f) {
   // Case 1: Resource assigned to variable, then variable passed to wrapper
-  exists(DataFlow::CallNode wrapper, Ident createVar, Ident argVar, string varName |
+  exists(DataFlow::CallNode wrapper, Ident argVar, string varName |
     // The resource is assigned to a variable (may be wrapped in type conversion)
     (
-      create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
-      create.asExpr().getParent().(AssignStmt).getLhs() = createVar or
-      create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
-      create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar or
-      // Handle type conversions: x := Type(create())
-      create.asExpr().getParent().getParent().(DefineStmt).getLhs() = createVar or
-      create.asExpr().getParent().getParent().(AssignStmt).getLhs() = createVar or
-      create.asExpr().getParent().getParent().(DefineStmt).getLhs(0) = createVar or
-      create.asExpr().getParent().getParent().(AssignStmt).getLhs(0) = createVar or
+      exists(Ident createVar |
+        (
+          create.asExpr().getParent().(DefineStmt).getLhs() = createVar or
+          create.asExpr().getParent().(AssignStmt).getLhs() = createVar or
+          create.asExpr().getParent().(DefineStmt).getLhs(0) = createVar or
+          create.asExpr().getParent().(AssignStmt).getLhs(0) = createVar or
+          // Handle type conversions: x := Type(create())
+          create.asExpr().getParent().getParent().(DefineStmt).getLhs() = createVar or
+          create.asExpr().getParent().getParent().(AssignStmt).getLhs() = createVar or
+          create.asExpr().getParent().getParent().(DefineStmt).getLhs(0) = createVar or
+          create.asExpr().getParent().getParent().(AssignStmt).getLhs(0) = createVar
+        ) and
+        createVar.getName() = varName
+      )
+      or
       // Handle var declarations: var x Type = create()
-      create.asExpr().getParent().(ValueSpec).getNameExpr() = createVar or
-      create.asExpr().getParent().(ValueSpec).getNameExpr(0) = createVar or
+      exists(ValueSpec spec |
+        spec = create.asExpr().getParent() and
+        varName = spec.getName(0)
+      )
+      or
       // Handle var declarations with type conversion: var x Type = Type2(create())
-      create.asExpr().getParent().getParent().(ValueSpec).getNameExpr() = createVar or
-      create.asExpr().getParent().getParent().(ValueSpec).getNameExpr(0) = createVar
+      exists(ValueSpec spec |
+        spec = create.asExpr().getParent().getParent() and
+        varName = spec.getName(0)
+      )
     ) and
-    createVar.getName() = varName and
     // The variable is used as an argument to a wrapper function
     wrapper.asExpr().getEnclosingFunction() = f and
     wrapper.getAnArgument().asExpr() = argVar and
