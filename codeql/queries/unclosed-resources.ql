@@ -329,6 +329,39 @@ predicate isClosedViaReturnedCallback(DataFlow::CallNode create, FuncDef f) {
 }
 
 /**
+ * Checks if a creation is followed by an error assertion indicating an error path test.
+ * This handles patterns like:
+ *   r, err := Open(memory.NewStorage(), nil)
+ *   require.Error(t, err) // or s.ErrorIs(err, ...), assert.Error(t, err), etc.
+ */
+predicate isErrorPathTest(DataFlow::CallNode create, FuncDef f) {
+  exists(DataFlow::CallNode errorCheck, string errVarName, Ident errVar, Ident createErrVar |
+    // The creation has an error variable in tuple assignment
+    (
+      create.asExpr().getParent().(DefineStmt).getLhs(1) = createErrVar or
+      create.asExpr().getParent().(AssignStmt).getLhs(1) = createErrVar
+    ) and
+    createErrVar.getName() = errVarName and
+    // There's an error checking call in the same function
+    errorCheck.asExpr().getEnclosingFunction() = f and
+    // The error check is one of the common assertion methods that expect an error
+    (
+      errorCheck.getTarget().getName() = "Error" or
+      errorCheck.getTarget().getName() = "ErrorIs" or
+      errorCheck.getTarget().getName() = "ErrorAs" or
+      errorCheck.getTarget().getName() = "ErrorContains" or
+      errorCheck.getTarget().hasQualifiedName("testing", "Fatal") or
+      errorCheck.getTarget().hasQualifiedName("testing", "Fatalf")
+    ) and
+    // The error check uses the same error variable
+    errVar = errorCheck.getAnArgument().asExpr() and
+    errVar.getName() = errVarName and
+    // The error check happens after the creation (basic ordering heuristic)
+    errorCheck.asExpr().getLocation().getStartLine() > create.asExpr().getLocation().getStartLine()
+  )
+}
+
+/**
  * Checks if the resource is cleaned up.
  * Tries precise tracking first, falls back to conservative heuristics for complex cases.
  */
@@ -409,7 +442,9 @@ where
   // Exclude calls to factory functions that only create memory storage
   not factoryCallCreatesOnlyMemoryStorage(create) and
   // Exclude resources passed to wrappers that are properly closed
-  not isPassedToClosedWrapper(create, enclosingFunc)
+  not isPassedToClosedWrapper(create, enclosingFunc) and
+  // Exclude error path tests where we expect the call to fail
+  not isErrorPathTest(create, enclosingFunc)
 select create.asExpr(),
   "Resource created but may not be closed. " +
   "Always call defer func() { _ = r.Close() }() after creating Repository or Storage instances."
