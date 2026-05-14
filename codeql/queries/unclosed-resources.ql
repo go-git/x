@@ -107,6 +107,26 @@ predicate factoryCallCreatesOnlyMemoryStorage(FactoryCall call) {
 }
 
 /**
+ * Checks if a factory call returns a pre-existing resource rather than creating a new one.
+ * These are "getter" factories that return resources from maps, fields, or parameters.
+ */
+predicate factoryCallReturnsExistingResource(FactoryCall call) {
+  exists(FuncDef factory |
+    // Match function by target binding
+    factory = call.getTarget().getFuncDecl() and
+    // Factory doesn't create any new storage or repository
+    not exists(DataFlow::CallNode create |
+      create.asExpr().getEnclosingFunction() = factory and
+      (
+        create instanceof RepositoryCreation or
+        create instanceof StorageCreation or
+        create.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage")
+      )
+    )
+  )
+}
+
+/**
  * A call to Close() method
  */
 class CloseCall extends DataFlow::MethodCallNode {
@@ -507,6 +527,8 @@ where
   not create.getTarget().hasQualifiedName("github.com/go-git/go-git/v6/storage/memory", "NewStorage") and
   // Exclude calls to factory functions that only create memory storage
   not factoryCallCreatesOnlyMemoryStorage(create) and
+  // Exclude calls to factory functions that return existing resources (getters, not creators)
+  not factoryCallReturnsExistingResource(create) and
   // Exclude resources passed to wrappers that are properly closed
   not isPassedToClosedWrapper(create, enclosingFunc) and
   // Exclude error path tests where we expect the call to fail
