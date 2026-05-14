@@ -225,6 +225,7 @@ predicate hasDeferWithTypeAssertion(DataFlow::CallNode create, FuncDef f) {
  *   t.Cleanup(func() { if c, ok := r.(io.Closer); ok { c.Close() } })
  */
 predicate hasTestingCleanupWithClose(DataFlow::CallNode create, FuncDef f) {
+  // Direct cleanup where creation variable name matches cleanup variable name
   exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, Ident createVar, string varName |
     // The cleanup call
     cleanup.getTarget().getName() = "Cleanup" and
@@ -260,6 +261,15 @@ predicate hasTestingCleanupWithClose(DataFlow::CallNode create, FuncDef f) {
         closedVar.getName() = closerName
       )
     )
+  )
+  or
+  // Dataflow-based cleanup detection: check if resource flows to cleanup Close() call
+  exists(DataFlow::CallNode cleanup, FuncLit cleanupFunc, CloseCall closeCall |
+    cleanup.getTarget().getName() = "Cleanup" and
+    cleanup.asExpr().getEnclosingFunction() = f and
+    cleanupFunc = cleanup.getArgument(0).asExpr() and
+    closeCall.asExpr().getEnclosingFunction+() = cleanupFunc and
+    DataFlow::localFlow(create.getResult(0), closeCall.getReceiver())
   )
 }
 
@@ -350,6 +360,7 @@ predicate isErrorPathTest(DataFlow::CallNode create, FuncDef f) {
       errorCheck.getTarget().getName() = "ErrorIs" or
       errorCheck.getTarget().getName() = "ErrorAs" or
       errorCheck.getTarget().getName() = "ErrorContains" or
+      errorCheck.getTarget().getName() = "NotNil" or
       errorCheck.getTarget().hasQualifiedName("testing", "Fatal") or
       errorCheck.getTarget().hasQualifiedName("testing", "Fatalf")
     ) and
@@ -395,6 +406,7 @@ predicate hasCleanup(DataFlow::CallNode create, DataFlow::Node resource, FuncDef
  * Also handles type conversions: temporal := storage.Storer(filesystem.NewStorage(...))
  */
 predicate isPassedToClosedWrapper(DataFlow::CallNode create, FuncDef f) {
+  // Case 1: Resource assigned to variable, then variable passed to wrapper
   exists(DataFlow::CallNode wrapper, Ident createVar, Ident argVar, string varName |
     // The resource is assigned to a variable (may be wrapped in type conversion)
     (
@@ -406,13 +418,33 @@ predicate isPassedToClosedWrapper(DataFlow::CallNode create, FuncDef f) {
       create.asExpr().getParent().getParent().(DefineStmt).getLhs() = createVar or
       create.asExpr().getParent().getParent().(AssignStmt).getLhs() = createVar or
       create.asExpr().getParent().getParent().(DefineStmt).getLhs(0) = createVar or
-      create.asExpr().getParent().getParent().(AssignStmt).getLhs(0) = createVar
+      create.asExpr().getParent().getParent().(AssignStmt).getLhs(0) = createVar or
+      // Handle var declarations: var x Type = create()
+      create.asExpr().getParent().(ValueSpec).getNameExpr() = createVar or
+      create.asExpr().getParent().(ValueSpec).getNameExpr(0) = createVar or
+      // Handle var declarations with type conversion: var x Type = Type2(create())
+      create.asExpr().getParent().getParent().(ValueSpec).getNameExpr() = createVar or
+      create.asExpr().getParent().getParent().(ValueSpec).getNameExpr(0) = createVar
     ) and
     createVar.getName() = varName and
     // The variable is used as an argument to a wrapper function
     wrapper.asExpr().getEnclosingFunction() = f and
     wrapper.getAnArgument().asExpr() = argVar and
     argVar.getName() = varName and
+    // The wrapper returns a Repository or Storage
+    (wrapper instanceof RepositoryCreation or
+     wrapper instanceof StorageCreation or
+     wrapper instanceof FactoryCall) and
+    // The wrapper is properly closed
+    hasCleanup(wrapper, wrapper.getResult(0), f)
+  )
+  or
+  // Case 2: Resource passed directly as argument to wrapper (inline)
+  // Pattern: r := Open(NewStorage(...), ...)
+  exists(DataFlow::CallNode wrapper |
+    wrapper.asExpr().getEnclosingFunction() = f and
+    // The creation is used directly as an argument to the wrapper
+    DataFlow::localFlow(create.getResult(0), wrapper.getAnArgument()) and
     // The wrapper returns a Repository or Storage
     (wrapper instanceof RepositoryCreation or
      wrapper instanceof StorageCreation or
