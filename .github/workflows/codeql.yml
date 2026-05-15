@@ -10,21 +10,29 @@ on:
         type: string
   push:
     branches: [main]
+    paths:
+      - 'codeql/**'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    paths:
+      - 'codeql/**'
+      - '.github/workflows/codeql.yml'
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}
 
 jobs:
   analyze:
     name: Analyze go-git with custom queries
     runs-on: ubuntu-latest
 
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
     steps:
       - name: Checkout x repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
 
       - name: Checkout go-git repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -32,7 +40,6 @@ jobs:
           repository: go-git/go-git
           ref: ${{ inputs.go-git-ref || 'main' }}
           path: go-git
-          fetch-depth: 0
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
@@ -43,8 +50,57 @@ jobs:
               - go-git
             queries:
               - uses: ./codeql/queries/unclosed-resources.ql
+        env:
+          CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: true
+
+      - name: Manual Build
+        working-directory: go-git
+        run: |
+          go build ./...
+          # Compile test files for CodeQL analysis
+          mkdir -p /tmp/codeql-build
+          for pkg in $(go list ./...); do
+            go test -c "$pkg" -o "/tmp/codeql-build/$(basename $pkg).test" || true
+          done
+          # Compile examples (ignored by ./... due to _ prefix)
+          # Build from example directories to ensure proper module context
+          find _examples -type d -mindepth 1 -maxdepth 2 | while read dir; do
+            if [ -f "$dir/main.go" ]; then
+              echo "Building example: $dir"
+              (cd "$dir" && go build -o "/tmp/codeql-build/$(basename $dir)" .) || true
+            fi
+          done
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
         with:
           category: go-git-custom-queries
+          output: sarif-results
+          upload: never
+
+      - name: Display CodeQL Results
+        if: always()
+        run: |
+          echo "=== CodeQL Analysis Results ==="
+          if [ -d "sarif-results" ]; then
+            result_count=0
+            for sarif in sarif-results/*.sarif; do
+              if [ -f "$sarif" ]; then
+                echo "Processing $sarif..."
+                # Output as GitHub Actions annotations and echo location to logs
+                jq -r '.runs[].results[] |
+                  "::\(.level // "warning") file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine),title=\(.ruleId)::\(.message.text | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))\n" +
+                  "at \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)"' "$sarif" 2>/dev/null || echo "No results in $sarif"
+                # Count results
+                count=$(jq '[.runs[].results[]] | length' "$sarif" 2>/dev/null || echo "0")
+                result_count=$((result_count + count))
+              fi
+            done
+            if [ $result_count -gt 10 ]; then
+              echo "::notice::Found $result_count CodeQL result(s) - GitHub Actions limits annotations to 10, see logs for complete results"
+            else
+              echo "::notice::Found $result_count CodeQL result(s)"
+            fi
+          else
+            echo "::warning::No SARIF results directory found"
+          fi
