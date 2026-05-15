@@ -96,7 +96,11 @@ jobs:
                 result_count=$((result_count + count))
               fi
             done
-            echo "::notice::Found $result_count CodeQL result(s)"
+            if [ $result_count -gt 10 ]; then
+              echo "::notice::Found $result_count CodeQL result(s) - GitHub Actions limits annotations to 10, see logs for complete results"
+            else
+              echo "::notice::Found $result_count CodeQL result(s)"
+            fi
           else
             echo "::warning::No SARIF results directory found"
           fi
