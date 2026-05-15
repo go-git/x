@@ -83,12 +83,18 @@ jobs:
         run: |
           echo "=== CodeQL Analysis Results ==="
           if [ -d "sarif-results" ]; then
+            result_count=0
             for sarif in sarif-results/*.sarif; do
               if [ -f "$sarif" ]; then
                 echo "Processing $sarif..."
-                jq -r '.runs[].results[] | "[\(.level // "warning")] \(.message.text) at \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)"' "$sarif" 2>/dev/null || echo "No results in $sarif"
+                # Output as GitHub Actions annotations
+                jq -r '.runs[].results[] | "::\(.level // "warning") file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine),title=\(.ruleId)::\(.message.text)"' "$sarif" 2>/dev/null || echo "No results in $sarif"
+                # Count results
+                count=$(jq '[.runs[].results[]] | length' "$sarif" 2>/dev/null || echo "0")
+                result_count=$((result_count + count))
               fi
             done
+            echo "::notice::Found $result_count CodeQL result(s)"
           else
-            echo "No SARIF results directory found"
+            echo "::warning::No SARIF results directory found"
           fi
