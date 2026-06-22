@@ -135,9 +135,59 @@ func TestSign_NilMessage(t *testing.T) {
 
 	signer, _ := newTestSigner(t, FormatOpenPGP, "ABC", nil)
 
-	sig, err := signer.Sign(nil)
+	sig, err := signer.Sign(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilMessage)
 	require.Nil(t, sig)
+}
+
+// TestSign_ThreadsContext asserts Sign threads the caller's context into the
+// command invocation for every format, rather than building the command with a
+// fresh context.Background(). The proof is propagation: cancelling the context
+// passed to Sign is observable through the context the command was created
+// with, which is only possible if it is the same context.
+func TestSign_ThreadsContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		format     Format
+		signingKey string
+	}{
+		{name: "openpgp", format: FormatOpenPGP, signingKey: "KEYID"},
+		{name: "x509", format: FormatX509, signingKey: "KEYID"},
+		{name: "ssh", format: FormatSSH, signingKey: "/path/to/key"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			signer, calls := newTestSigner(t, test.format, test.signingKey, func(cmd *mockCommand) error {
+				if test.format == FormatSSH {
+					return writeSignatureFile(cmd.args[len(cmd.args)-1])
+				}
+
+				_, err := io.WriteString(cmd.stdout, "SIG\n")
+				require.NoError(t, err)
+
+				return nil
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			_, err := signer.Sign(ctx, strings.NewReader("body"))
+			require.NoError(t, err)
+
+			require.Len(t, calls(), 1)
+			got := calls()[0].ctx
+			require.NotNil(t, got)
+
+			require.NoError(t, got.Err())
+			cancel()
+			assert.ErrorIs(t, got.Err(), context.Canceled)
+		})
+	}
 }
 
 func TestSign_StdioFormats(t *testing.T) {
@@ -163,7 +213,7 @@ func TestSign_StdioFormats(t *testing.T) {
 				return nil
 			})
 
-			sig, err := signer.Sign(strings.NewReader("commit body\n"))
+			sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
 			require.NoError(t, err)
 			assert.Equal(t, "STDIO-SIG\n", string(sig))
 			assert.Equal(t, "commit body\n", stdin)
@@ -184,7 +234,7 @@ func TestSign_StdioFailure(t *testing.T) {
 		return errStdioExit
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stdio failed")
 	require.Nil(t, sig)
@@ -206,7 +256,7 @@ func TestSign_SSH(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(strings.NewReader("commit body\n"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "SSH-SIG\n", string(sig))
 	assert.Equal(t, "commit body\n", buffer)
@@ -234,7 +284,7 @@ func TestSign_SSHExpandsHomePath(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(strings.NewReader("commit body\n"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "SSH-SIG\n", string(sig))
 
@@ -290,7 +340,7 @@ func TestSign_SSHLiteralKey(t *testing.T) {
 				return writeSignatureFile(bufferFile)
 			})
 
-			sig, err := signer.Sign(strings.NewReader("commit body\n"))
+			sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
 			require.NoError(t, err)
 			assert.Equal(t, "SSH-SIG\n", string(sig))
 			assert.Equal(t, "commit body\n", buffer)
@@ -320,7 +370,7 @@ func TestSign_SSHFailure(t *testing.T) {
 		return errSSHExit
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh failed")
 	require.Nil(t, sig)
@@ -335,7 +385,7 @@ func TestSign_SSHPathPrefixedSshDash(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.NoError(t, err)
 	require.NotNil(t, sig)
 
@@ -359,7 +409,7 @@ func TestSign_StdioOutputTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrOutputLimitExceeded)
 	assert.Contains(t, err.Error(), "stdout")
 	require.Nil(t, sig)
@@ -379,7 +429,7 @@ func TestSign_StderrTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrOutputLimitExceeded)
 	assert.Contains(t, err.Error(), "stderr")
 	require.Nil(t, sig)
@@ -401,12 +451,13 @@ func TestSign_SSHSignatureTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(strings.NewReader("body"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrSignatureTooLarge)
 	require.Nil(t, sig)
 }
 
 type mockCommand struct {
+	ctx     context.Context //nolint:containedctx // captured to assert Sign threads its context into the command.
 	run     func(*mockCommand) error
 	stdin   io.Reader
 	stdout  io.Writer
@@ -457,8 +508,9 @@ func stubCommand(run func(*mockCommand) error) (
 ) {
 	calls := make([]*mockCommand, 0, 1)
 
-	commandContext := func(_ context.Context, binary string, args ...string) command {
+	commandContext := func(ctx context.Context, binary string, args ...string) command {
 		cmd := &mockCommand{
+			ctx:     ctx,
 			run:     run,
 			stdin:   nil,
 			stdout:  nil,

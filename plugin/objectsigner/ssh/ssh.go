@@ -4,6 +4,7 @@
 package ssh
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -69,8 +70,10 @@ type signer struct {
 
 // Sign reads the message from r and returns an armored SSH signature created
 // with the signer's SSH key and hash algorithm.
-// The signature uses the "git" namespace.
-func (s *signer) Sign(message io.Reader) ([]byte, error) {
+// The signature uses the "git" namespace. The context is accepted for
+// interface uniformity across signers; SSH signing is purely local and does
+// not consult it.
+func (s *signer) Sign(_ context.Context, message io.Reader) ([]byte, error) {
 	if message == nil {
 		return nil, ErrNilMessage
 	}
@@ -81,4 +84,10 @@ func (s *signer) Sign(message io.Reader) ([]byte, error) {
 	}
 
 	return sshsig.Armor(sig), nil
+}
+
+// KeyID returns the SHA256 fingerprint of the signer's SSH public key,
+// in the form "SHA256:...".
+func (s *signer) KeyID() string {
+	return gossh.FingerprintSHA256(s.signer.PublicKey())
 }

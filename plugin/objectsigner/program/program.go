@@ -150,17 +150,17 @@ func resolveProgram(program string, lookPath func(string) (string, error)) (stri
 }
 
 // Sign reads message and returns the signature produced by the external
-// binary.
-func (s *signer) Sign(message io.Reader) ([]byte, error) {
+// binary. The context cancels the external program invocation.
+func (s *signer) Sign(ctx context.Context, message io.Reader) ([]byte, error) {
 	if message == nil {
 		return nil, ErrNilMessage
 	}
 
 	switch s.format {
 	case FormatOpenPGP, FormatX509:
-		return s.signStdio(context.Background(), message)
+		return s.signStdio(ctx, message)
 	case FormatSSH:
-		return s.signSSH(context.Background(), message)
+		return s.signSSH(ctx, message)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedFormat, s.format)
 	}

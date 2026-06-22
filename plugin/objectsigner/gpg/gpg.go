@@ -4,6 +4,7 @@ package gpg
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -36,8 +37,10 @@ type signer struct {
 }
 
 // Sign reads message and returns an ASCII-armored detached GPG
-// signature created with the signer's OpenPGP key.
-func (s *signer) Sign(message io.Reader) ([]byte, error) {
+// signature created with the signer's OpenPGP key. The context is accepted
+// for interface uniformity across signers; native OpenPGP signing is purely
+// local and does not consult it.
+func (s *signer) Sign(_ context.Context, message io.Reader) ([]byte, error) {
 	if message == nil {
 		return nil, ErrNilMessage
 	}

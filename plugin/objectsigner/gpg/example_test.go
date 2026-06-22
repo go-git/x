@@ -1,6 +1,7 @@
 package gpg_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -21,7 +22,7 @@ func ExampleFromKey() {
 		panic(err)
 	}
 
-	sig, err := signer.Sign(strings.NewReader("signed commit message\n"))
+	sig, err := signer.Sign(context.Background(), strings.NewReader("signed commit message\n"))
 	if err != nil {
 		panic(err)
 	}
