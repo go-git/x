@@ -135,7 +135,7 @@ func TestSign_NilMessage(t *testing.T) {
 
 	signer, _ := newTestSigner(t, FormatOpenPGP, "ABC", nil)
 
-	sig, err := signer.Sign(context.Background(), nil)
+	sig, err := signer.Sign(t.Context(), nil)
 	require.ErrorIs(t, err, ErrNilMessage)
 	require.Nil(t, sig)
 }
@@ -173,8 +173,8 @@ func TestSign_ThreadsContext(t *testing.T) {
 				return nil
 			})
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
 
 			_, err := signer.Sign(ctx, strings.NewReader("body"))
 			require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestSign_StdioFormats(t *testing.T) {
 				return nil
 			})
 
-			sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
+			sig, err := signer.Sign(t.Context(), strings.NewReader("commit body\n"))
 			require.NoError(t, err)
 			assert.Equal(t, "STDIO-SIG\n", string(sig))
 			assert.Equal(t, "commit body\n", stdin)
@@ -234,7 +234,7 @@ func TestSign_StdioFailure(t *testing.T) {
 		return errStdioExit
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stdio failed")
 	require.Nil(t, sig)
@@ -256,7 +256,7 @@ func TestSign_SSH(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("commit body\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "SSH-SIG\n", string(sig))
 	assert.Equal(t, "commit body\n", buffer)
@@ -284,7 +284,7 @@ func TestSign_SSHExpandsHomePath(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("commit body\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "SSH-SIG\n", string(sig))
 
@@ -340,7 +340,7 @@ func TestSign_SSHLiteralKey(t *testing.T) {
 				return writeSignatureFile(bufferFile)
 			})
 
-			sig, err := signer.Sign(context.Background(), strings.NewReader("commit body\n"))
+			sig, err := signer.Sign(t.Context(), strings.NewReader("commit body\n"))
 			require.NoError(t, err)
 			assert.Equal(t, "SSH-SIG\n", string(sig))
 			assert.Equal(t, "commit body\n", buffer)
@@ -370,7 +370,7 @@ func TestSign_SSHFailure(t *testing.T) {
 		return errSSHExit
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh failed")
 	require.Nil(t, sig)
@@ -385,7 +385,7 @@ func TestSign_SSHPathPrefixedSshDash(t *testing.T) {
 		return writeSignatureFile(bufferFile)
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.NoError(t, err)
 	require.NotNil(t, sig)
 
@@ -409,7 +409,7 @@ func TestSign_StdioOutputTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrOutputLimitExceeded)
 	assert.Contains(t, err.Error(), "stdout")
 	require.Nil(t, sig)
@@ -429,7 +429,7 @@ func TestSign_StderrTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrOutputLimitExceeded)
 	assert.Contains(t, err.Error(), "stderr")
 	require.Nil(t, sig)
@@ -451,7 +451,7 @@ func TestSign_SSHSignatureTooLarge(t *testing.T) {
 		return nil
 	})
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader("body"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("body"))
 	require.ErrorIs(t, err, ErrSignatureTooLarge)
 	require.Nil(t, sig)
 }

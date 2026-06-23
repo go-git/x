@@ -2,7 +2,6 @@ package gpg_test
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"strings"
 	"testing"
@@ -63,7 +62,7 @@ func TestSign(t *testing.T) {
 			signer, err := gpg.FromKey(generateTestKey(t))
 			require.NoError(t, err)
 
-			sig, err := signer.Sign(context.Background(), test.message)
+			sig, err := signer.Sign(t.Context(), test.message)
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
 				require.Nil(t, sig)
@@ -86,7 +85,7 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 
 	message := "signed commit message\n"
 
-	sig, err := signer.Sign(context.Background(), strings.NewReader(message))
+	sig, err := signer.Sign(t.Context(), strings.NewReader(message))
 	require.NoError(t, err)
 
 	keyring := openpgp.EntityList{key}
@@ -107,10 +106,10 @@ func TestSignDifferentMessagesProduceDifferentSignatures(t *testing.T) {
 	signer, err := gpg.FromKey(key)
 	require.NoError(t, err)
 
-	sig1, err := signer.Sign(context.Background(), strings.NewReader("message one"))
+	sig1, err := signer.Sign(t.Context(), strings.NewReader("message one"))
 	require.NoError(t, err)
 
-	sig2, err := signer.Sign(context.Background(), strings.NewReader("message two"))
+	sig2, err := signer.Sign(t.Context(), strings.NewReader("message two"))
 	require.NoError(t, err)
 
 	assert.NotEqual(t, sig1, sig2, "different messages produced identical signatures")
