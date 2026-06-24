@@ -10,8 +10,12 @@ github.com/go-git/go-billy/v6 v6.0.0-20260328065524-593ae452e14d h1:bLMI9z4mKkfQ
 github.com/go-git/go-billy/v6 v6.0.0-20260328065524-593ae452e14d/go.mod h1:LLeMBFApkgIKwMzirxpU9XB7NvO2HdTw5FXmeP1M6c8=
 github.com/go-git/x/plugin/objectsigner/gpg v0.1.0 h1:NEGVSOD+LPnus6j4iNkAZaHVTc4DNY223y1/I2Jq2yI=
 github.com/go-git/x/plugin/objectsigner/gpg v0.1.0/go.mod h1:1iosWq3OOqZxtNrwDHtcjicswuaOT45J5GMFyCk80wc=
+github.com/go-git/x/plugin/objectsigner/gpg v0.2.0 h1:3EGE1apJAh2Z9qUxBUCPSdQMbasQi1WFA9VJfgtkMa8=
+github.com/go-git/x/plugin/objectsigner/gpg v0.2.0/go.mod h1:1iosWq3OOqZxtNrwDHtcjicswuaOT45J5GMFyCk80wc=
 github.com/go-git/x/plugin/objectsigner/ssh v0.1.0 h1:lAeeDgc1oxsMMvVUed6ssrqJnD97UR1K/dXIDdeg1Yc=
 github.com/go-git/x/plugin/objectsigner/ssh v0.1.0/go.mod h1:6BvpZj9Yry1ZFNw4N5OZDc+7M1T8oyrZilLNFg2aTsM=
+github.com/go-git/x/plugin/objectsigner/ssh v0.2.0 h1:TkAMmGl8SgI3CL6BZv5Pv1cLxBAfmjkyE6jObUm/+zc=
+github.com/go-git/x/plugin/objectsigner/ssh v0.2.0/go.mod h1:6BvpZj9Yry1ZFNw4N5OZDc+7M1T8oyrZilLNFg2aTsM=
 github.com/hiddeco/sshsig v0.2.0 h1:gMWllgKCITXdydVkDL+Zro0PU96QI55LwUwebSwNTSw=
 github.com/hiddeco/sshsig v0.2.0/go.mod h1:nJc98aGgiH6Yql2doqH4CTBVHexQA40Q+hMMLHP4EqE=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

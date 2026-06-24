@@ -38,7 +38,7 @@ func TestFromConfigSSH(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 	assert.Contains(t, string(sig), "-----END SSH SIGNATURE-----")
@@ -62,7 +62,7 @@ func TestFromConfigSSHPubSuffixNoAgent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -114,7 +114,7 @@ func TestFromConfigSSHKeyLiteralAgent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -149,7 +149,7 @@ func TestFromConfigSSHAgentPubKeyPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -180,7 +180,7 @@ func TestFromConfigSSHAgentMultipleKeys(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 
@@ -260,7 +260,7 @@ func TestFromConfigSSHAgentPrivateKeyPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -303,7 +303,7 @@ func TestFromConfigSSHAgentFirstKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -352,7 +352,7 @@ func TestFromConfigGPG(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN PGP SIGNATURE-----")
 	assert.Contains(t, string(sig), "-----END PGP SIGNATURE-----")
@@ -373,7 +373,7 @@ func TestFromConfigGPGDefaultFormat(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN PGP SIGNATURE-----")
 }
@@ -442,7 +442,7 @@ func TestFromConfigGPGEncryptedThenUnencrypted(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN PGP SIGNATURE-----")
 }
@@ -462,7 +462,7 @@ func TestFromConfigGPGMultipleKeys(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN PGP SIGNATURE-----")
 }
@@ -517,7 +517,7 @@ func TestFromConfigSSHHomeTilde(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -553,7 +553,7 @@ func TestFromConfigSSHAgentHomeTildePubKey(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN SSH SIGNATURE-----")
 }
@@ -587,7 +587,7 @@ func TestFromConfigGPGHomeTilde(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sig, err := signer.Sign(strings.NewReader("hello\n"))
+	sig, err := signer.Sign(t.Context(), strings.NewReader("hello\n"))
 	require.NoError(t, err)
 	assert.Contains(t, string(sig), "-----BEGIN PGP SIGNATURE-----")
 }
