@@ -18,6 +18,7 @@ package auto
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -97,9 +98,10 @@ type Config struct {
 }
 
 // Signer signs a message read from an io.Reader and returns the raw signature
-// bytes.
+// bytes. The context cancels signers that perform external or remote work
+// (e.g. an external program); purely local signers ignore it.
 type Signer interface {
-	Sign(message io.Reader) ([]byte, error)
+	Sign(ctx context.Context, message io.Reader) ([]byte, error)
 }
 
 // FromConfig returns a [Signer] configured according to the provided Config.
