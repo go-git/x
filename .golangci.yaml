@@ -4,6 +4,12 @@ linters:
   disable:
   - depguard
   - wsl
+  exclusions:
+    # Integration-test harnesses shell out to git/gpg and rely on patterns the
+    # production-oriented linters flag (subprocess exec, package-level test
+    # state, long table-driven tests). Exempt them from linting.
+    paths:
+    - conformance_.*_test\.go
   settings:
     gomoddirectives:
       replace-local: true
