@@ -4,6 +4,42 @@ linters:
   disable:
   - depguard
   - wsl
+  exclusions:
+    rules:
+    # Code ported from upstream projects keeps its original style, so it is
+    # easier to compare with upstream. Correctness linters still apply.
+    - path: ssh/knownhosts/knownhosts(_test)?\.go|ssh/agent/pageant_windows\.go
+      linters:
+      - cyclop
+      - dogsled
+      - embeddedstructfieldcheck
+      - err113
+      - exhaustruct
+      - exhaustruct_v5
+      - funlen
+      - goconst
+      - ireturn
+      - lll
+      - mnd
+      - nlreturn
+      - noinlineerr
+      - nonamedreturns
+      - testpackage
+      - varnamelen
+      - wrapcheck
+      - wsl_v5
+    # Pageant is reached through Win32 calls that need unsafe pointers and
+    # package level procedure handles.
+    - path: ssh/agent/pageant_windows\.go
+      linters:
+      - gochecknoglobals
+      - godot
+      - gosec
+    # copyData mirrors the Win32 COPYDATASTRUCT layout.
+    - path: ssh/agent/pageant_windows\.go
+      linters:
+      - govet
+      text: fieldalignment
   settings:
     gomoddirectives:
       replace-local: true
