@@ -4,6 +4,30 @@ linters:
   disable:
   - depguard
   - wsl
+  exclusions:
+    rules:
+    # Code ported from upstream projects keeps its original style, so it is
+    # easier to compare with upstream. Correctness linters still apply.
+    - path: ssh/knownhosts/knownhosts(_test)?\.go
+      linters:
+      - cyclop
+      - dogsled
+      - embeddedstructfieldcheck
+      - err113
+      - exhaustruct
+      - exhaustruct_v5
+      - funlen
+      - goconst
+      - ireturn
+      - lll
+      - mnd
+      - nlreturn
+      - noinlineerr
+      - nonamedreturns
+      - testpackage
+      - varnamelen
+      - wrapcheck
+      - wsl_v5
   settings:
     gomoddirectives:
       replace-local: true
